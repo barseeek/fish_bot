@@ -96,7 +96,7 @@ class Strapi:
     @staticmethod
     def get_products():
         url = f'http://{Strapi.host}/api/products'
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=Strapi.headers)
         response.raise_for_status()
         return response.json()
 
