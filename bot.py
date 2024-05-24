@@ -129,11 +129,11 @@ def handle_email(update, context):
     email = update.message.text
 
     if not Strapi.get_user(email):
+        email, password = Strapi.create_user(email, update.message.from_user.username, context.user_data["cart_id"])
         context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"Вы указали почту: {email}",
+            text=f"Ваш логин от ЛК Strapi: {email}\n Пароль: {password}",
         )
-        Strapi.create_user(email, update.message.from_user.username, context.user_data["cart_id"])
     else:
         context.bot.send_message(
             chat_id=update.effective_chat.id,

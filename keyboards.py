@@ -36,7 +36,6 @@ CART_KEYBOARD = InlineKeyboardMarkup(
 EMPTY_CART_KEYBOARD = InlineKeyboardMarkup(
     [
         [
-            InlineKeyboardButton('Оформить заказ', callback_data='order'),
             InlineKeyboardButton('В меню', callback_data='to_menu'),
         ]
     ]
