@@ -1,10 +1,11 @@
+from environs import Env
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
-from utils import Strapi
+import api_functions
 
 
-def get_products_keyboard():
-    payload = Strapi.get_products()
+def get_products_keyboard(host, headers):
+    payload = api_functions.get_products(host, headers)
     keyboard = [[InlineKeyboardButton(text='Моя корзина', callback_data='my_cart')]]
     for product in payload['data']:
         keyboard.append([InlineKeyboardButton(product['attributes']['Title'], callback_data=product['id'])])
@@ -12,7 +13,6 @@ def get_products_keyboard():
     return InlineKeyboardMarkup(keyboard, row_width=1)
 
 
-MENU_KEYBOARD = get_products_keyboard()
 PRODUCT_KEYBOARD = InlineKeyboardMarkup(
     [
         [
@@ -40,3 +40,5 @@ EMPTY_CART_KEYBOARD = InlineKeyboardMarkup(
         ]
     ]
 )
+
+
