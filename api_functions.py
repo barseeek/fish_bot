@@ -115,7 +115,7 @@ def get_product(host, headers, product_id):
 
 def add_to_cart(host, headers, cart_id, product_id, quantity=1):
     message = 'Товар добавлен в корзину'
-    cart_product_id = create_cart_product(product_id, quantity)
+    cart_product_id = create_cart_product(host, headers, product_id, quantity)
     url = f'http://{host}/api/carts/{cart_id}'
     payload = {
         "data": {

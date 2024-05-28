@@ -1,5 +1,6 @@
 import logging
 import os
+from functools import partial
 
 import redis
 from environs import Env
@@ -7,9 +8,9 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram.ext import Filters, Updater
 
-from keyboards import MENU_KEYBOARD, PRODUCT_KEYBOARD, CART_KEYBOARD, EMPTY_CART_KEYBOARD
+from keyboards import PRODUCT_KEYBOARD, CART_KEYBOARD, EMPTY_CART_KEYBOARD, get_products_keyboard
 from log import TelegramLogsHandler
-from utils import Strapi
+import api_functions
 
 _database = None
 
@@ -31,25 +32,24 @@ def start(update, context):
 def handle_cart(update, context):
     query = update.callback_query
     query.answer()
+    host = context.bot_data.get('host')
+    headers = context.bot_data.get('headers')
 
-    cart_id = Strapi.get_cart_id_by_tg_id(query.from_user.id)
+    if query.data == "back" or query.data == "to_menu":
+        show_menu(update, context)
+        context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=update.callback_query.message.message_id,
+        )
+        return "HANDLE_DESCRIPTION"
+
+    cart_id = api_functions.get_cart_id_by_tg_id(host, headers, query.from_user.id)
     if not cart_id:
-        cart_id = Strapi.create_cart(query.from_user.id)
+        cart_id = api_functions.create_cart(host, headers, query.from_user.id)
     context.user_data["cart_id"] = cart_id
 
     if query.data == "my_cart":
-        message = 'Ваша корзина:\n'
-        cart_products = Strapi.get_cart_products(cart_id)
-
-        if not cart_products:
-            query.message.reply_text(text='Ваша корзина пуста', reply_markup=EMPTY_CART_KEYBOARD)
-
-        for cart_product in cart_products["items"]:
-            message += f"""🛒{cart_product['title']} 🔢{cart_product['amount']} {cart_product['unit']} 💰{cart_product['total_unit_price']} руб.\n"""
-        message += f"Общая сумма: {round(cart_products['total_price'], 2)} руб."
-
-        query.message.reply_text(text=message, reply_markup=CART_KEYBOARD)
-        context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
+        show_cart(update, context)
 
     elif query.data == "order":
         context.bot.send_message(
@@ -58,7 +58,7 @@ def handle_cart(update, context):
         )
         return "WAITING_EMAIL"
     elif query.data == "delete_product":
-        cart_products = Strapi.get_cart_products(cart_id)
+        cart_products = api_functions.get_cart_products(host, headers, cart_id)
         delete_product_keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -78,14 +78,14 @@ def handle_cart(update, context):
         if not product_id:
             query.message.reply_text(text='Не могу найти товар, обратитесь в поддержку')
 
-        message = Strapi.add_to_cart(cart_id, product_id)
+        message = api_functions.add_to_cart(host, headers, cart_id, product_id)
         query.message.reply_text(text=message)
         show_menu(update, context)
         context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
-        return 'HANDLE_MENU'
+        return 'HANDLE_DESCRIPTION'
     else:
         cart_product_id = query.data.replace('delete_product_', '')
-        message = Strapi.delete_cart_product(cart_product_id)
+        message = api_functions.delete_cart_product(host, headers, cart_product_id)
         query.message.reply_text(text=message)
         show_menu(update, context)
         context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
@@ -106,13 +106,39 @@ def handle_menu(update, context):
     return "HANDLE_DESCRIPTION"
 
 
+def show_cart(update, context):
+    query = update.callback_query
+    cart_id = api_functions.get_cart_id_by_tg_id(host, headers, query.from_user.id)
+    if not cart_id:
+        cart_id = api_functions.create_cart(host, headers, query.from_user.id)
+    context.user_data["cart_id"] = cart_id
+    message = 'Ваша корзина:\n'
+    cart_products = api_functions.get_cart_products(host, headers, cart_id)
+
+    if not cart_products:
+        query.message.reply_text(text='Ваша корзина пуста', reply_markup=EMPTY_CART_KEYBOARD)
+
+    for cart_product in cart_products["items"]:
+        message += f"""🛒{cart_product['title']} 🔢{cart_product['amount']} {cart_product['unit']} 💰{cart_product['total_unit_price']} руб.\n"""
+    message += f"Общая сумма: {round(cart_products['total_price'], 2)} руб."
+
+    query.message.reply_text(text=message, reply_markup=CART_KEYBOARD)
+    context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
+
+
 def handle_description(update, context):
     query = update.callback_query
     query.answer()
+    host = context.bot_data.get('host')
+    headers = context.bot_data.get('headers')
+
+    if query.data == "my_cart":
+        show_cart(update, context)
+        return "HANDLE_CART"
 
     product_id = query.data
     context.user_data["product_id"] = product_id
-    product, image_data = Strapi.get_product(product_id)
+    product, image_data = api_functions.get_product(host, headers, product_id)
     message = f"{product.get('description')}\n\nЦена - {product.get('price')} руб. за {product.get('unit')}"
     context.bot.send_photo(
         chat_id=query.message.chat_id,
@@ -127,9 +153,12 @@ def handle_description(update, context):
 
 def handle_email(update, context):
     email = update.message.text
+    host = context.bot_data.get('host')
+    headers = context.bot_data.get('headers')
 
-    if not Strapi.get_user(email):
-        email, password = Strapi.create_user(email, update.message.from_user.username, context.user_data["cart_id"])
+    if not api_functions.get_user(host, headers, email):
+        email, password = api_functions.create_user(host, headers, email, update.message.from_user.username,
+                                                    context.user_data["cart_id"])
         context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=f"Ваш логин от ЛК Strapi: {email}\n Пароль: {password}",
@@ -171,12 +200,6 @@ def handle_users_reply(update, context):
         return
     if user_reply == '/start':
         user_state = 'START'
-    elif user_reply == 'back' or user_reply == 'to_menu':
-        user_state = 'HANDLE_MENU'
-    elif user_reply == 'add_to_cart':
-        user_state = 'HANDLE_CART'
-    elif user_reply == 'my_cart':
-        user_state = 'HANDLE_CART'
     else:
         user_state = db.get(chat_id).decode("utf-8")
 
@@ -204,8 +227,8 @@ def get_database_connection():
     global _database
     if _database is None:
         database_password = env.str("REDIS_PASSWORD")
-        database_host = os.getenv("REDIS_HOST")
-        database_port = os.getenv("REDIS_PORT")
+        database_host = env.str("REDIS_HOST")
+        database_port = env.int("REDIS_PORT")
         _database = redis.Redis(host=database_host, port=database_port, password=database_password)
     return _database
 
@@ -216,6 +239,10 @@ if __name__ == '__main__':
     token = env.str("TELEGRAM_BOT_TOKEN")
     chat_id = env.str('TELEGRAM_CHAT_ID')
     telegram_log_token = env.str('TELEGRAM_LOG_BOT_TOKEN')
+    host = env.str("STRAPI_HOST", "localhost:1337")
+    headers = {'Authorization': f'bearer {env.str("STRAPI_TOKEN")}'}
+
+    MENU_KEYBOARD = get_products_keyboard(host, headers)
 
     tg_handler = TelegramLogsHandler(chat_id, telegram_log_token)
     logger.addHandler(tg_handler)
@@ -223,6 +250,8 @@ if __name__ == '__main__':
 
     updater = Updater(token)
     dispatcher = updater.dispatcher
+    dispatcher.bot_data['host'] = host
+    dispatcher.bot_data['headers'] = headers
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
