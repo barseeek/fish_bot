@@ -1,6 +1,4 @@
 import logging
-import os
-from functools import partial
 
 import redis
 from environs import Env
@@ -8,9 +6,9 @@ from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from telegram.ext import Filters, Updater
 
+import api_functions
 from keyboards import PRODUCT_KEYBOARD, CART_KEYBOARD, EMPTY_CART_KEYBOARD, get_products_keyboard
 from log import TelegramLogsHandler
-import api_functions
 
 _database = None
 
@@ -25,7 +23,10 @@ def start(update, context):
     Теперь в ответ на его команды будет запускается хэндлер echo.
     """
 
-    update.message.reply_text(text='Привет!', reply_markup=MENU_KEYBOARD)
+    update.message.reply_text(
+        text='Привет!',
+        reply_markup=get_products_keyboard(context.bot_data.get('host'), context.bot_data.get('headers'))
+    )
     return "HANDLE_DESCRIPTION"
 
 
@@ -95,13 +96,20 @@ def handle_cart(update, context):
 
 
 def show_menu(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text='Выберите позицию:', reply_markup=MENU_KEYBOARD)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text='Выберите позицию:',
+        reply_markup=get_products_keyboard(context.bot_data.get('host'), context.bot_data.get('headers'))
+    )
 
 
 def handle_menu(update, context):
     query = update.callback_query
     query.answer()
-    query.message.reply_text(text='Выберите позицию:', reply_markup=MENU_KEYBOARD)
+    query.message.reply_text(
+        text='Выберите позицию:',
+        reply_markup=get_products_keyboard(context.bot_data.get('host'), context.bot_data.get('headers'))
+    )
     context.bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
     return "HANDLE_DESCRIPTION"
 
@@ -241,8 +249,6 @@ if __name__ == '__main__':
     telegram_log_token = env.str('TELEGRAM_LOG_BOT_TOKEN')
     host = env.str("STRAPI_HOST", "localhost:1337")
     headers = {'Authorization': f'bearer {env.str("STRAPI_TOKEN")}'}
-
-    MENU_KEYBOARD = get_products_keyboard(host, headers)
 
     tg_handler = TelegramLogsHandler(chat_id, telegram_log_token)
     logger.addHandler(tg_handler)
